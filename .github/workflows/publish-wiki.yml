@@ -1,0 +1,53 @@
+# Copies everything in the wiki/ folder into this repo's GitHub wiki.
+# Pages are added or updated; pages you made in the wiki editor are left alone.
+# To delete a wiki page, list its file name (e.g. Old-Page.md) in wiki/.remove.
+name: Publish wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - ".github/workflows/publish-wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Clone wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git clone "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki-repo
+
+      - name: Copy pages and images
+        run: |
+          rsync -a --exclude '.remove' wiki/ wiki-repo/
+          if [ -f wiki/.remove ]; then
+            while IFS= read -r f || [ -n "$f" ]; do
+              [ -n "$f" ] && rm -f -- "wiki-repo/$f"
+            done < wiki/.remove
+          fi
+
+      - name: Commit and push to wiki
+        working-directory: wiki-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+            exit 0
+          fi
+          git commit -m "Sync wiki from ${GITHUB_SHA::7}"
+          git push
